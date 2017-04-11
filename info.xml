@@ -1,0 +1,14 @@
+<plugin name="Nanotube Detection">
+	<author>
+		Brett Settle
+	</author>
+	<directory>
+		NanotubeDetection
+	</directory>
+	<version>
+		0.0.1
+	</version>
+	<menu_layout>
+		<action location="nanotubes" function="nanotubes.gui">Open Detection Menu</action>
+	</menu_layout>
+</plugin>
