@@ -12,19 +12,31 @@ from skimage.transform import (hough_line, hough_line_peaks,
                                probabilistic_hough_line)
 
 class Nanotubes(BaseProcess):
+    """Nanotube detection using a probably Hough line algorithm.  Generate a binary image with the Canny Edge detector or method of your choice.
+    The following parameters are used to more exactly locate the tubules in the image:
+
+    threshold: the value to use to separate the image into a binary image
+    line_length: The minimum length of a tube in the image, in pixels
+    line_gap: minimum space between two lines
+    """
 
     def __init__(self):
         BaseProcess.__init__(self)
-        self.currentWindow = None
+        self.currentWindow = g.currentWindow
         self.lineItem = pg.PlotDataItem()
-        self.searchThread = NanotubeDetectionThread(self)
-        self.searchThread.finished.connect(self.addLines)
-        
 
+        self.searchThread = NanotubeDetectionThread(self)
+        self.searchThread.finished.connect(self.setLines)
+        self.statusLabel = QtWidgets.QLabel()
+        self.searchThread.sigError.connect(self.statusLabel.setText)
+        
     def __call__(self, **kargs):
         pass
-
+    
     def preview(self):
+        if self.searchThread.isRunning():
+            return
+
         if self.getValue('data_window') != self.currentWindow:
             if self.currentWindow is not None:
                 self.currentWindow.imageview.view.removeItem(self.lineItem)
@@ -37,13 +49,21 @@ class Nanotubes(BaseProcess):
         if self.getValue('frame') != self.currentWindow.currentIndex:
             self.currentWindow.setIndex(self.getValue('frame'))
 
+        
+        self.searchThread.start()
+
     def findTubes(self):
         if self.searchThread.isRunning():
             self.searchThread.terminate()
         self.clearLines()
         self.searchThread.start()
 
-    def addLines(self):
+    def setLines(self):
+        self.clearLines()
+        if len(self.searchThread.xs) > 0:
+            self.statusLabel.setText('')
+        else:
+            return
         xs = self.searchThread.xs
         ys = self.searchThread.ys
         connect = self.searchThread.connect
@@ -91,11 +111,15 @@ class Nanotubes(BaseProcess):
         self.items.append({'name': 'line_gap', 'string': 'Line Gap', 'object': line_gap})
         self.items.append({'name': 'start_button', 'string': '', 'object': startButton})
         self.items.append({'name': 'stop_button', 'string': '', 'object': stopButton})
+        self.items.append({'name': 'status', 'string': '', 'object': self.statusLabel})
 
         super().gui()
+        self.windowSelector.setValue(self.currentWindow)
         self.ui.bbox.hide()
 
 class NanotubeDetectionThread(QtCore.QThread):
+
+    sigError = QtCore.Signal(str)
 
     def __init__(self, proc):
         QtCore.QThread.__init__(self)
@@ -105,30 +129,39 @@ class NanotubeDetectionThread(QtCore.QThread):
         self.connect = []
 
     def run(self):
+        self.xs = []
+        self.ys = []
+        self.connect = []
+
         newVals = {k: self.proc.getValue(k) for k in ('frame', 'threshold', 'line_length', 'line_gap')}
-        
         image = self.proc.currentWindow.imageview.getImageItem().image
 
         self.lines = probabilistic_hough_line(image, threshold=newVals['threshold'], line_length=newVals['line_length'],
                                          line_gap=newVals['line_gap'])
-        
+
         self.vals = newVals
         
+        if len(self.lines) > 2000:
+            self.sigError.emit("Found %d probable lines. Use more specific parameters or filter your image more." % len(self.lines))
+            return
+        
+        '''
         fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(12,6), sharex=True, sharey=True)
 
         ax1.imshow(image, cmap=plt.cm.gray)
         ax1.set_title('Input image')
         ax1.set_axis_off()
         ax1.set_adjustable('box-forced')
+        #plt.show()
+        
+        #ax2.imshow(edges, cmap=plt.cm.gray)
+        #ax2.set_title('Canny edges')
+        #ax2.set_axis_off()
+        #ax2.set_adjustable('box-forced')
 
-        ax2.imshow(edges, cmap=plt.cm.gray)
-        ax2.set_title('Canny edges')
-        ax2.set_axis_off()
-        ax2.set_adjustable('box-forced')
+        #ax3.imshow(edges * 0)
 
-        ax3.imshow(edges * 0)
-
-        for line in lines:
+        for line in self.lines:
             p0, p1 = line
             ax3.plot((p0[0], p1[0]), (p0[1], p1[1]))
 
@@ -144,7 +177,7 @@ class NanotubeDetectionThread(QtCore.QThread):
         if len(self.lines) > 20000:
             g.alert("Too many lines to plot")
             return
-
+        '''
         xs = []
         ys = []
         connect = []
@@ -157,7 +190,7 @@ class NanotubeDetectionThread(QtCore.QThread):
         self.connect = np.array(connect)
         self.xs = np.array(xs)
         self.ys = np.array(ys)
-
+        
         self.finished.emit()
 
 
