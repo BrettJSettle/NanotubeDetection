@@ -11,6 +11,15 @@ import matplotlib.pyplot as plt
 from skimage.transform import (hough_line, hough_line_peaks,
                                probabilistic_hough_line)
 
+
+class Line():
+    def __init__(self, ptA, ptB):
+        self.pts = [ptA, ptB]
+        self.slopes = [1. / np.divide(*np.subtract(ptA, ptB))]
+
+    def isExtenstion(self, ptA, ptB):
+        pass
+
 class Nanotubes(BaseProcess):
     """Nanotube detection using a probably Hough line algorithm.  Generate a binary image with the Canny Edge detector or method of your choice.
     The following parameters are used to more exactly locate the tubules in the image:
@@ -22,7 +31,6 @@ class Nanotubes(BaseProcess):
 
     def __init__(self):
         BaseProcess.__init__(self)
-        self.currentWindow = g.currentWindow
         self.lineItem = pg.PlotDataItem()
 
         self.searchThread = NanotubeDetectionThread(self)
@@ -36,29 +44,39 @@ class Nanotubes(BaseProcess):
     def preview(self):
         if self.searchThread.isRunning():
             return
+        w = self.windowSelector.value()
 
-        if self.getValue('data_window') != self.currentWindow:
-            if self.currentWindow is not None:
-                self.currentWindow.imageview.view.removeItem(self.lineItem)
-            window = self.windowSelector.value()
-            window.imageview.view.addItem(self.lineItem)
-            self.currentWindow = window
-            self.frameSpin.setEnabled(window.mt > 1)
-            self.frameSpin.setRange(0, window.mt-1)
+        if self.getValue('data_window') != w:
+            if w is not None and hasattr(w, 'imageview'):
+                w.imageview.view.removeItem(self.lineItem)
+            w.imageview.view.addItem(self.lineItem)
+            self.frameSpin.setEnabled(w.mt > 1)
+            self.frameSpin.setRange(0, w.mt-1)
 
-        if self.getValue('frame') != self.currentWindow.currentIndex:
-            self.currentWindow.setIndex(self.getValue('frame'))
+        if self.getValue('frame') != w.currentIndex:
+            w.setIndex(self.getValue('frame'))
 
-        
-        self.searchThread.start()
+        #self.searchThread.start()
 
     def findTubes(self):
         if self.searchThread.isRunning():
             self.searchThread.terminate()
-        self.clearLines()
-        self.searchThread.start()
+
+        w = self.windowSelector.value()
+        if set(w.image.flatten()) | {0, 1} == {0, 1}:
+            self.searchThread.start()
+        else:
+            print("Not Binary")
 
     def setLines(self):
+        w = self.windowSelector.value()
+        try:
+            if w is not None and hasattr(w, 'imageview') and self.lineItem.parentWidget() == w.imageview.view:
+                w.imageview.view.removeItem(self.lineItem)
+        except:
+            pass
+        w.imageview.view.addItem(self.lineItem)
+        w = self.windowSelector.value()
         self.clearLines()
         if len(self.searchThread.xs) > 0:
             self.statusLabel.setText('')
@@ -67,7 +85,6 @@ class Nanotubes(BaseProcess):
         xs = self.searchThread.xs
         ys = self.searchThread.ys
         connect = self.searchThread.connect
-        print(xs, ys, connect)
         self.lineItem.setData(x=xs, y=ys, connect=connect, pen=pg.mkPen({'color': "F00", 'width': 2}))
 
     def clearLines(self):
@@ -82,9 +99,10 @@ class Nanotubes(BaseProcess):
 
     def gui(self):
         self.gui_reset()
+        self.lineItem = pg.PlotDataItem()
         self.windowSelector=WindowSelector()
 
-        self.addConsole()
+        #self.addConsole()
 
         self.frameSpin = SliderLabel(0)
         threshold = SliderLabel(0)
@@ -114,8 +132,13 @@ class Nanotubes(BaseProcess):
         self.items.append({'name': 'status', 'string': '', 'object': self.statusLabel})
 
         super().gui()
-        self.windowSelector.setValue(self.currentWindow)
+        if g.currentWindow is not None:
+            self.windowSelector.setValue(g.currentWindow)
         self.ui.bbox.hide()
+        self.ui.closeEvent = self.closeEvent
+
+    def closeEvent(self, ev):
+        self.lineItem.parentWidget().removeItem(self.lineItem)
 
 class NanotubeDetectionThread(QtCore.QThread):
 
@@ -134,16 +157,18 @@ class NanotubeDetectionThread(QtCore.QThread):
         self.connect = []
 
         newVals = {k: self.proc.getValue(k) for k in ('frame', 'threshold', 'line_length', 'line_gap')}
-        image = self.proc.currentWindow.imageview.getImageItem().image
+        w = self.proc.getValue("data_window")
+        image = w.imageview.getImageItem().image
 
         self.lines = probabilistic_hough_line(image, threshold=newVals['threshold'], line_length=newVals['line_length'],
                                          line_gap=newVals['line_gap'])
 
         self.vals = newVals
         
-        if len(self.lines) > 2000:
+        if len(self.lines) > 4000:
             self.sigError.emit("Found %d probable lines. Use more specific parameters or filter your image more." % len(self.lines))
             return
+        print("Found %d lines" % len(self.lines))
         
         '''
         fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(12,6), sharex=True, sharey=True)
